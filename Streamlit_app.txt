@@ -1,0 +1,112 @@
+import streamlit as st
+import numpy as np
+import matplotlib.pyplot as plt
+from collections import defaultdict
+
+class MinesPredictor:
+    def __init__(self, grid_size=(5,5)):
+        self.grid_size = grid_size
+        self.history = []
+        self.mine_counts = defaultdict(int)
+        self.safe_counts = defaultdict(int)
+
+    def add_round(self, mines, safe):
+        self.history.append((mines, safe))
+        for m in mines:
+            self.mine_counts[m] += 1
+        for s in safe:
+            self.safe_counts[s] += 1
+
+    def predict(self):
+        probs = np.zeros(self.grid_size)
+        for r in range(self.grid_size[0]):
+            for c in range(self.grid_size[1]):
+                pos = (r, c)
+                mine_freq = self.mine_counts[pos]
+                safe_freq = self.safe_counts[pos]
+                probs[r, c] = (mine_freq + 1) / (mine_freq + safe_freq + 2)
+        return probs
+
+    def summary(self):
+        probs = self.predict()
+        safe = [(r, c) for r in range(self.grid_size[0]) for c in range(self.grid_size[1]) if probs[r, c] < 0.3]
+        mines = [(r, c) for r in range(self.grid_size[0]) for c in range(self.grid_size[1]) if probs[r, c] > 0.7]
+        return {
+            "Predicted Safe Spots": safe,
+            "Potential Mine Locations": mines,
+            "Confidence Levels": {(r, c): probs[r, c] for r in range(self.grid_size[0]) for c in range(self.grid_size[1])},
+            "Analysis Summary": "Green = safe tendencies, Red = risky tendencies."
+        }
+
+    def visualize(self):
+        probs = self.predict()
+        fig, ax = plt.subplots()
+        cax = ax.matshow(probs, cmap="RdYlGn_r")
+        fig.colorbar(cax, label="Mine Probability")
+        for (i, j), val in np.ndenumerate(probs):
+            ax.text(j, i, f"{val:.2f}", ha="center", va="center", color="black")
+        ax.set_xticks(np.arange(self.grid_size[1]))
+        ax.set_yticks(np.arange(self.grid_size[0]))
+        ax.set_title("Mines Predictor Heatmap")
+        return fig
+
+# --- Streamlit App ---
+st.set_page_config(layout="wide")
+st.title("Mines Predictor Bot 🎮")
+st.write("Click cells below to mark them as **Mine** (💣) or **Safe** (✅), then add the round.")
+
+# Initialize predictor and state
+if "bot" not in st.session_state:
+    st.session_state.bot = MinesPredictor(grid_size=(5, 5))
+if "mines" not in st.session_state:
+    st.session_state.mines = set()
+if "safe" not in st.session_state:
+    st.session_state.safe = set()
+
+# Callback function to handle button clicks reliably
+def _handle_click(r, c):
+    pos = (r, c)
+    if pos in st.session_state.mines:
+        st.session_state.mines.remove(pos)
+        st.session_state.safe.add(pos)
+    elif pos in st.session_state.safe:
+        st.session_state.safe.remove(pos)
+    else:
+        st.session_state.mines.add(pos)
+
+bot = st.session_state.bot
+
+# Interactive grid for input
+st.subheader("Mark Round Data")
+cols = st.columns(bot.grid_size[1])
+for r in range(bot.grid_size[0]):
+    for c in range(bot.grid_size[1]):
+        with cols[c]:
+            pos = (r, c)
+            label = "⬜"
+            if pos in st.session_state.mines:
+                label = "💣"
+            elif pos in st.session_state.safe:
+                label = "✅"
+            
+            st.button(label, key=f"btn_{r}-{c}", on_click=_handle_click, args=(r, c))
+
+# Add round button
+def add_round_callback():
+    st.session_state.bot.add_round(list(st.session_state.mines), list(st.session_state.safe))
+    st.session_state.mines.clear()
+    st.session_state.safe.clear()
+
+if st.button("✅ Save Round"):
+    add_round_callback()
+    st.success("Round added!")
+
+# Display prediction results
+st.subheader("Prediction Summary")
+summary = bot.summary()
+st.json(summary)
+
+# Display heatmap visualization
+st.subheader("Heatmap Visualization")
+fig = bot.visualize()
+st.pyplot(fig)
